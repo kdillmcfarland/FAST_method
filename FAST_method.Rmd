@@ -1,0 +1,674 @@
+---
+title: "FAST method"
+author: "Kim Dill-McFarland"
+date: "Oct 4, 2017"
+output:
+  html_document: 
+    toc: true
+    toc_float: true
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+#Introduction
+Convenient, reproducible, and rapid preservation of unique biological samples is pivotal to their use in microbiome analyses. As an increasing number of human longitudinal studies are looking to incorporate human microbiome data, the need for such sample collection and storage methods is high. Here, we describe the Fecal Aliquot Straw Technique (FAST) of fecal sample processing for long-term storage.
+
+For 8 subjects (Sub.1-Sub.8), samples types are:
+
+* Straw 1 (S1): straw 1 sample resulting from FAST method
+* Straw 2 (S1): gavage of straw 2 sample used in humanization of mice
+* Mouse fecals (F1-3): mouse fecal samples from mice humanized with different donor Subjects (N = 3 per Subject)
+    + Collectively referenced as mice (M)
+
+###
+
+#Data
+##Load packages
+```{r Packages, warning=FALSE, message=FALSE}
+#Manipulation of tables
+library(tidyr)
+library(reshape2)
+#Community ecology package (Bray-Curtis, Jaccard)
+library(vegan)
+#Community ecology package (UniFrac)
+library(phyloseq)
+#Linear and nonlinear mixed effects models
+library(nlme)
+#Pairwise comparisons within nlme models
+library(multcomp)
+#Plots and visualization
+library(ggplot2)
+#Plotting multiple ggplot2 plots in one frame
+library(cowplot)
+#Venn diagrams
+library(venneuler)
+```
+
+##Load functions
+```{r}
+#Pairwise PERMANOVAs
+source("Functions/Pairwise_adonis_all.r")
+
+#Function to identify taxa shared by S1 and S1 or S2 and M for each subject. Taxon must be at least 0.1% relaive abundance in at least one sample in the comparison for each subject.
+#Creates input for mean.counts
+source("Functions/venn.abund.all.r")
+#Function to calculate percentages of taxa recovered across FAST (counts from venn.abund.all) and means and standard errors of these percentages
+#Fig. 2B & 3B
+source("Functions/mean.counts.r")
+
+#Function to identify taxa shared by S1 and S1 or S2 and M for each subject. No abundance cutoff
+#Creates input for venn.perc
+source("Functions/venn.all.r")
+#Function to pull shared OTUs (determined by venn.all function) out of OTU table and calculate percent relative abundance of those shared OTUs
+#Fig. 2C & 3D
+source("Functions/venn.perc.r")
+
+#To obtain lists of beta-diversity values of mouse samples compared to samples from their matched subject donor (DONOR) or compared to any other subject in the dataset (OTHER).
+source("Functions/donor.other.r")
+```
+
+##Load data
+```{r Load.data}
+#Un-rarified OTU table from mothur
+OTU = read.table("Data/WLS.mouse.final.opti_mcc.unique_list.shared", sep="\t", header=TRUE)
+  row.names(OTU) = OTU$Group
+  OTU = OTU[,!names(OTU) %in% c("label","Group","numOtus")]
+
+#Rarified OTU table from mothur
+OTU.norm = read.table("Data/WLS.mouse.final.opti_mcc.unique_list.0.03.norm.shared", sep="\t", header=TRUE)
+  row.names(OTU.norm) = OTU.norm$Group
+  OTU.norm = OTU.norm[,!names(OTU.norm) %in% c("label","Group","numOtus")]
+
+#Metadata and alpha-diversity measures  
+meta = read.table("Data/Metadata.txt", sep="\t", header=TRUE, row.names=1)
+
+#Taxonomy of OTUs from mothur
+tax = read.table("Data/WLS.mouse.final.opti_mcc.unique_list.0.03.cons.taxonomy", sep="\t", header=TRUE)
+  row.names(tax) = tax$OTU
+  tax = separate(tax, Taxonomy, into = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species", "Strain"), sep=";")
+  tax = tax[,!(names(tax) %in% c("Size", "Strain", "OTU"))]
+  
+#Taxa tables: OTUs summed at difference taxonomic levels
+phyla = as.data.frame(t(read.table("Data/phyla_unrare.txt", sep="\t", header=TRUE, row.names=1)))
+order = as.data.frame(t(read.table("Data/order_unrare.txt", sep="\t", header=TRUE, row.names=1)))
+family = as.data.frame(t(read.table("Data/family_unrare.txt", sep="\t", header=TRUE, row.names=1)))
+genus = as.data.frame(t(read.table("Data/genus_unrare.txt", sep="\t", header=TRUE, row.names=1)))
+```
+
+Order the data so that all tables have rows in the same order
+```{r}
+#Order all by samples name
+OTU = OTU[order(row.names(OTU)),]
+OTU.norm = OTU.norm[order(row.names(OTU.norm)),]
+meta = meta[order(row.names(meta)),]
+phyla = phyla[order(row.names(phyla)),]
+order = order[order(row.names(order)),]
+family = family[order(row.names(family)),]
+genus = genus[order(row.names(genus)),]
+```
+
+Calculate OTU precent relative abundance
+```{r}
+abund=OTU/rowSums(OTU)*100
+```
+
+###
+
+#Data manipulation
+##Phyloseq object
+All samples
+```{r}
+#Load rarified data into phyloseq objects
+OTU.UF = otu_table(as.matrix(OTU.norm), taxa_are_rows=FALSE)
+Tax.UF = tax_table(as.matrix(tax))
+meta.UF = sample_data(meta)
+
+#Load pre-calculated neighbor-joining tree
+load("Data/NJ.tree.Rdata")
+
+#Merge into phyloseq object
+physeq.tree = merge_phyloseq(OTU.UF, Tax.UF, meta.UF, NJ.tree)
+physeq.tree
+```
+
+Mouse-derived samples only
+```{r}
+OTU.norm.M = OTU.norm[meta$Type=="F",]
+OTU.UF.M = otu_table(as.matrix(OTU.norm.M), taxa_are_rows=FALSE)
+meta.UF.M = sample_data(meta[meta$Type=="F",])
+
+physeq.tree.M = merge_phyloseq(OTU.UF.M, Tax.UF, meta.UF.M, NJ.tree)
+physeq.tree.M
+```
+
+Human-derived samples only
+```{r}
+OTU.norm.H = OTU.norm[meta$Type !="F",]
+OTU.UF.H = otu_table(as.matrix(OTU.norm.H), taxa_are_rows=FALSE)
+meta.UF.H = sample_data(meta[meta$Type!="F",])
+
+physeq.tree.H = merge_phyloseq(OTU.UF.H, Tax.UF, meta.UF.H, NJ.tree)
+physeq.tree.H
+```
+
+##Calculate beta-diversity
+All samples
+```{r}
+set.seed(35426)
+#Bray-Curtis
+BC.dist=as.matrix(vegdist(OTU.norm, distance="bray"))
+#Jaccard
+J.dist=(BC.dist*2)/(BC.dist+1)
+#Weighted UniFrac
+wUF.dist = as.matrix(UniFrac(physeq.tree, weighted=TRUE, normalized=TRUE))
+#Unweighted UniFrac
+uwUF.dist = as.matrix(UniFrac(physeq.tree, weighted=FALSE, normalized=TRUE))
+```
+
+##Calculate nMDS
+For use in Fig. 2A, 3A, & S3
+```{r}
+set.seed(35426)
+#All samples
+uwUF.nmds = ordinate(physeq.tree, method="NMDS", distance="unifrac", weighted=FALSE)
+#Human-derived samples
+uwUF.nmds.H = ordinate(physeq.tree.H, method="NMDS", distance="unifrac", weighted=FALSE)
+#Mouse-derived samples
+uwUF.nmds.M = ordinate(physeq.tree.M, method="NMDS", distance="unifrac", weighted=FALSE)
+```
+
+##Count taxa recover
+For use in Fig. 2B & 3B
+
+Taxa shared by S1 and S1 *or* S2 and M for each subject. Taxon must be at least 0.1% relaive abundance in at least one sample in the comparison for each subject.
+
+Count and taxa lists at each taxonomic level
+```{r}
+venn.abund.all(OTU, "OTU")
+venn.abund.all(genus, "genus")
+venn.abund.all(family, "family")
+venn.abund.all(order, "order")
+venn.abund.all(phyla, "phyla")
+```
+
+Read in results tables
+```{r}
+taxa.OTU = read.table("output_venn.abund.all/OTU.venn.abund.all.count.csv", sep=",", header=FALSE, row.names=1)
+  colnames(taxa.OTU) = c("count","comp","subject")
+taxa.genus = read.table("output_venn.abund.all/genus.venn.abund.all.count.csv", sep=",", header=FALSE, row.names=1)
+  colnames(taxa.genus) = c("count","comp","subject")
+taxa.family = read.table("output_venn.abund.all/family.venn.abund.all.count.csv", sep=",", header=FALSE, row.names=1)
+  colnames(taxa.family) = c("count","comp","subject")
+taxa.order = read.table("output_venn.abund.all/order.venn.abund.all.count.csv", sep=",", header=FALSE, row.names=1)
+  colnames(taxa.order) = c("count","comp","subject")
+taxa.phyla = read.table("output_venn.abund.all/phyla.venn.abund.all.count.csv", sep=",", header=FALSE, row.names=1)
+  colnames(taxa.phyla) = c("count","comp","subject")
+```
+
+Convert counts to percentages of taxa recovered across FAST and means and standard errors of these percentages.
+
+Run across taxonomic levels
+```{r}
+mean.counts(c("taxa.OTU", "taxa.genus", "taxa.family", "taxa.order", "taxa.phyla"))
+```
+
+Read in results
+```{r}
+taxa.recover = read.table("output_mean.counts/mean.counts.csv", sep=",", header=FALSE, row.names=1) 
+  colnames(taxa.recover) = c("mean","se","comp","taxa")
+#Add variable of taxa in order  
+  taxa.recover$taxa.ord = ifelse(taxa.recover$taxa == "taxa.OTU", "5.OTU",
+                          ifelse(taxa.recover$taxa == "taxa.genus", "4.genus",
+                          ifelse(taxa.recover$taxa == "taxa.family", "3.family",
+                          ifelse(taxa.recover$taxa == "taxa.order", "2.order",
+                          ifelse(taxa.recover$taxa == "taxa.phyla", "1.phyla", NA)))))
+```
+
+##Relative abundance taxa recover
+For Fig. 2C & 3D
+
+How much of straw1 relative abundance occurs in straw2?  
+How much of straw2 relative abundance occurs in mice?
+
+Identify taxa shared by S1 and S1 or S2 and M for each subject. No abundance cutoff.
+```{r}
+venn.all(OTU, "OTU")
+```
+
+Read in results
+```{r}
+OTU.list = read.table("output_venn.all/OTU.venn.all.list.csv", sep=",", row.names=1)
+  colnames(OTU.list) = c("OTU","comparison","Subject")
+```
+
+Pull shared OTUs (determined by venn.all) out of OTU table and calculate percent relative abundance of those shared OTUs
+```{r}
+venn.perc(OTU)
+```
+
+Read in results
+```{r}
+venn.perc = read.csv("output_venn.perc/venn.perc.csv", header=FALSE, row.names=1)
+  colnames(venn.perc) = c("Percent","Comparison","Group","Subject")
+```
+
+##Bloom/lost in mice
+Identify taxa that are more or less abundant in mouse samples compared to respective donor samples.
+```{r}
+#Calculate relative abundance of genera
+genus.abund = genus/rowSums(genus)*100
+#Remove S1 samples as comparison is S2 to M
+genus.abund = genus.abund[!meta$Type == "S1",]
+#Remove genera at <1% relative abundance across all samples
+genus.abund.cutoff = genus.abund[, apply(genus.abund, MARGIN=2, function(x) any(x > 1))]
+
+#Melt data from short/wide to long/skinny for all genera (columns)
+genus.meta = merge(meta, genus.abund.cutoff, by="row.names")
+    genus.meta = genus.meta[,!colnames(genus.meta) %in% c("Row.names", "chao", "shannon")]
+
+#Create variable for samples in desired order    
+genus.meta$Type.ord = ifelse(genus.meta$Type == "S2", "1_S2",
+                  ifelse(genus.meta$Type == "F", "2_F", genus.meta$Type))
+genus.meta$Type.ord = as.factor(genus.meta$Type.ord)
+
+#Melt metadata from short/wide to long/skinny
+genus.melt = melt(genus.meta, id.vars=c("Type","HM","Subject","Sample", "Type.ord"))
+```
+
+##Donor vs. other
+For Fig. 3E
+
+To obtain lists of beta-diversity values of mouse samples compared to samples from their matched subject donor (DONOR) or compared to any other subject in the dataset (OTHER).
+
+Rename subjects to numbers so that distance may be calculated
+```{r}
+meta$Subject.num = ifelse(meta$Subject == "Sub.1",1,
+                    ifelse(meta$Subject == "Sub.2",2,
+                     ifelse(meta$Subject == "Sub.3",3,
+                      ifelse(meta$Subject == "Sub.4",4,
+                       ifelse(meta$Subject == "Sub.5",5,
+                         ifelse(meta$Subject == "Sub.6",6,                                               ifelse(meta$Subject == "Sub.7",7,
+                             ifelse(meta$Subject == "Sub.8",8,NA))))))))
+```                                             
+
+Pull out DONOR and OTHER beta-values
+```{r}
+donor.other(meta$Subject.num, meta$Type, c("BC","J","uwUF","wUF"))
+```
+
+Read in results
+```{r}
+donor.other = read.csv("output_donor.other/donor.other.csv", header=FALSE, row.names=1)
+  colnames(donor.other) = c("distance","comparison","metric")
+```
+
+###
+
+#Statistics
+##Beta-diversity
+###Mouse fecals
+Do the mouse fecal samples differ within each individual?
+```{r}
+adonis(BC.dist[row.names(meta[meta$Type == "F",]),row.names(meta[meta$Type == "F",])] ~ Sample, data=meta[meta$Type == "F",], permutations=1000, strata=meta[meta$Type == "F",]$Subject)
+
+adonis(J.dist[row.names(meta[meta$Type == "F",]),row.names(meta[meta$Type == "F",])] ~ Sample, data=meta[meta$Type == "F",], permutations=1000, strata=meta[meta$Type == "F",]$Subject)
+
+adonis(wUF.dist[row.names(meta[meta$Type == "F",]),row.names(meta[meta$Type == "F",])] ~ Sample, data=meta[meta$Type == "F",], permutations=1000, strata=meta[meta$Type == "F",]$Subject)
+
+adonis(uwUF.dist[row.names(meta[meta$Type == "F",]),row.names(meta[meta$Type == "F",])] ~ Sample, data=meta[meta$Type == "F",], permutations=1000, strata=meta[meta$Type == "F",]$Subject)
+```
+
+Do mice innoculated from different donors differ from one another?
+```{r}
+adonis(BC.dist[row.names(meta[meta$Type == "F",]),row.names(meta[meta$Type == "F",])] ~ Subject, data=meta[meta$Type == "F",], permutations=1000)
+
+adonis(J.dist[row.names(meta[meta$Type == "F",]),row.names(meta[meta$Type == "F",])] ~ Subject, data=meta[meta$Type == "F",], permutations=1000)
+
+adonis(wUF.dist[row.names(meta[meta$Type == "F",]),row.names(meta[meta$Type == "F",])] ~ Subject, data=meta[meta$Type == "F",], permutations=1000)
+
+adonis(uwUF.dist[row.names(meta[meta$Type == "F",]),row.names(meta[meta$Type == "F",])] ~ Subject, data=meta[meta$Type == "F",], permutations=1000)
+```
+
+###Mouse vs human
+Do human- (S1, S2) and mouse-derived (F) samples differ overall, regardless of subject?
+```{r}
+adonis(BC.dist ~ HM, data=meta, permutations=1000)
+adonis(J.dist ~ HM, data=meta, permutations=1000)
+adonis(wUF.dist ~ HM, data=meta, permutations=1000)
+adonis(uwUF.dist ~ HM, data=meta, permutations=1000)
+```
+
+###Full model
+Do samples (S1, S2, F) differ within subjects?
+```{r}
+adonis(BC.dist ~ Type, data=meta, permutations=1000, strata=meta$Subject)
+adonis(J.dist ~ Type, data=meta, permutations=1000, strata=meta$Subject)
+adonis(wUF.dist ~ Type, data=meta, permutations=1000, strata=meta$Subject)
+adonis(wUF.dist ~ Type, data=meta, permutations=1000, strata=meta$Subject)
+```
+
+Pairwise between all sample types
+```{r}
+pairwise.adonis.all(OTU.norm, meta, meta$Type, "bray", NJ.tree, stratify=TRUE, meta$Subject, "bonferroni")
+
+pairwise.adonis.all(OTU.norm, meta, meta$Type, "jaccard", NJ.tree, stratify=TRUE, meta$Subject, "bonferroni")
+
+pairwise.adonis.all(OTU.norm, meta, meta$Type, "wunifrac", NJ.tree, stratify=TRUE, meta$Subject, "bonferroni")
+
+pairwise.adonis.all(OTU.norm, meta, meta$Type, "uwunifrac", NJ.tree, stratify=TRUE, meta$Subject, "bonferroni")
+```
+
+###Donor vs. other
+Is a mouse more like it's human donor than other humans in the dataset?
+```{r}
+kruskal.test(donor.other[donor.other$metric == "BC",]$distance ~ donor.other[donor.other$metric == "BC",]$comparison)
+
+kruskal.test(donor.other[donor.other$metric == "J",]$distance ~ donor.other[donor.other$metric == "J",]$comparison)
+
+kruskal.test(donor.other[donor.other$metric == "wUF",]$distance ~ donor.other[donor.other$metric == "wUF",]$comparison)
+
+kruskal.test(donor.other[donor.other$metric == "uwUF",]$distance ~ donor.other[donor.other$metric == "uwUF",]$comparison)
+```
+
+##Alpha-diversity
+###Mouse fecals
+Do the mouse fecal samples differ within each individual?
+```{r}
+summary(aov(meta[meta$Type == "F",]$shannon ~ Sample + Error(Subject/Sample), data=meta[meta$Type == "F",]))
+summary(aov(meta[meta$Type == "F",]$chao ~ Sample + Error(Subject/Sample), data=meta[meta$Type == "F",]))
+```
+
+Do mice innoculated from different donors differ?
+```{r}
+summary(aov(meta[meta$Type == "F",]$shannon ~ Subject, data=meta[meta$Type == "F",]))
+summary(aov(meta[meta$Type == "F",]$chao ~ Subject, data=meta[meta$Type == "F",]))
+```
+
+###Mouse vs human
+Do human- (S1, S2) and mouse-derived (F) samples differ overall, regardless of subject?
+```{r}
+summary(aov(shannon ~ HM, data=meta))
+summary(aov(chao ~ HM, data=meta))
+```
+
+###Full model
+Do samples (S1, S2, F) differ within subjects?
+```{r}
+shan.mod = lme(shannon ~ Type, random = ~1|Subject, data=meta)
+anova(shan.mod)
+#Pairwise
+summary(glht(shan.mod,linfct=mcp(Type="Tukey")))
+
+chao.mod = lme(chao ~ Type, random = ~1|Subject, data=meta)
+anova(chao.mod)
+#Pairwise
+summary(glht(chao.mod,linfct=mcp(Type="Tukey")))
+```
+
+#Figures
+##Figure 2A
+Non-metric multidimensional scaling plots of the unweighted UniFrac metric between human-derived samples, colored by subject. Colored ellipses are smallest area for human samples from each subject drawn in Illustrator. 
+
+```{r}
+nMDS_uwUF_H=plot_ordination(physeq.tree.H, uwUF.nmds.H, type="sites", color="Subject", shape="Type") + 
+  theme_bw() + 
+  scale_shape_manual(values=c(17,15,3)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_rect(color="black", fill=NA)) +
+  ggtitle("Unweighted UniFrac")
+
+#View
+nMDS_uwUF_H
+
+#Save
+save_plot("Figures/Fig2A.eps", nMDS_uwUF_H)
+```
+
+##Figure 2B
+Taxa recovery in S2 compared to S1. Calculated with non-rarified data. Identified taxa were at least 0.1% relative abundance in at least one of the two samples in each comparison. 
+
+```{r}
+S12.recovery=ggplot(taxa.recover[taxa.recover$comp == "S12",], aes(taxa.ord, mean)) + 
+  geom_bar(fill = "darkorange", position = "dodge", stat="identity") +
+  geom_errorbar(aes(ymax=taxa.recover[taxa.recover$comp == "S12",]$mean +
+  taxa.recover[taxa.recover$comp == "S12",]$se, ymin=taxa.recover[taxa.recover$comp == "S12",]$mean - taxa.recover[taxa.recover$comp == "S12",]$se)) +
+  theme(legend.position="none")
+
+#View
+S12.recovery
+#Save
+save_plot("Figures/Fig2B.eps", S12.recovery, base_height=3, base_width=4)
+```
+
+##Figure 2C
+Percent relative abundance of S1 community captured in oral gavage preparation (S2). Where shown, bars represent mean ± standard error.
+
+```{r}
+perc.retain.S12 = ggplot(venn.perc[venn.perc$Group %in% c("S1S2"),], aes(x=Group, y=Percent)) + 
+  geom_boxplot(aes(group=Group)) +
+  geom_jitter(width=0.15, height=0, aes(color=Subject)) +
+  ylim(98,100)
+
+#View
+perc.retain.S12
+#Save
+postscript("Figures/Fig2C.ps", width = 3, height = 3, horizontal = FALSE, colormodel = "rgb", fonts=c("serif"))
+perc.retain.S12
+dev.off()
+```
+
+##Figure 3A
+Non-metric multidimensional scaling plots of the unweighted UniFrac metric between mouse fecal samples, colored by donor. Colored ellipses are smallest area for mouse-derived samples from each subject drawn in Illustrator. 
+
+```{r}
+nMDS_uwUF_M=plot_ordination(physeq.tree.M, uwUF.nmds.M, type="sites", color="Subject", shape="Type") + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_rect(color="black", fill=NA)) +
+  ggtitle("Unweighted UniFrac") 
+
+#View
+nMDS_uwUF_M
+
+#Save
+save_plot("Figures/Fig3A.eps", nMDS_uwUF_M)
+```
+
+##Figure 3B
+Taxa recovery in mouse fecal samples compared to oral inoculum (S2). Calculated with non-rarified data. Identified taxa were at least 0.1% relative abundance in at least one of the four samples in each comparison (S2 and 3 mouse fecal samples). 
+
+```{r}
+S2M.recovery=ggplot(taxa.recover[taxa.recover$comp == "S2M",], aes(taxa.ord, mean)) +   
+  geom_bar(fill = "darkgreen", position = "dodge", stat="identity")+
+  geom_errorbar(aes(ymax=taxa.recover[taxa.recover$comp == "S2M",]$mean +
+  taxa.recover[taxa.recover$comp == "S2M",]$se, ymin=taxa.recover[taxa.recover$comp == "S2M",]$mean - taxa.recover[taxa.recover$comp == "S2M",]$se)) +
+    theme(legend.position="none")
+
+#View
+S2M.recovery
+#Save
+save_plot("Figures/Fig3B.eps", S2M.recovery, base_height=3, base_width=4)
+```
+
+##Figure 3C
+OTU Venn diagrams. Yellow circles represent OTUs in the oral inoculum (A=S2) and blue circles represent OTUs recovered in the mouse (B=M).
+
+Create venns scaled to total OTU counts from `venn.abund.all` function. Cutoff of 0.1% in at least one sample in a given venn.
+```{r}
+Sub.1_S2M = venneuler(c('A'=13,'A&B'=61,'B'=3))
+Sub.2_S2M = venneuler(c('A'=23,'A&B'=90,'B'=0))
+Sub.3_S2M = venneuler(c('A'=27,'A&B'=73,'B'=8))
+Sub.4_S2M = venneuler(c('A'=22,'A&B'=83,'B'=5))
+Sub.5_S2M = venneuler(c('A'=23,'A&B'=79,'B'=14))
+Sub.6_S2M = venneuler(c('A'=20,'A&B'=74,'B'=1))
+Sub.7_S2M = venneuler(c('A'=17,'A&B'=74,'B'=1))
+Sub.8_S2M = venneuler(c('A'=44,'A&B'=89,'B'=12))
+```
+
+Save Venns in 1 figure
+```{r}
+pdf("Figures/Fig.3C.pdf", width = 20, height = 8, colormodel = "rgb", fonts=c("serif"))
+ 
+layout(matrix(c(1,2,3,4,5,6,7,8), 2, 4))
+plot(Sub.1_S2M, col=c("yellow","blue"))
+plot(Sub.2_S2M, col=c("yellow","blue"))
+plot(Sub.3_S2M, col=c("yellow","blue"))
+plot(Sub.4_S2M, col=c("yellow","blue"))
+plot(Sub.5_S2M, col=c("yellow","blue"))
+plot(Sub.6_S2M, col=c("yellow","blue"))
+plot(Sub.7_S2M, col=c("yellow","blue"))
+plot(Sub.8_S2M, col=c("yellow","blue"))
+
+dev.off()
+```
+
+##Figure 3D
+Percent relative abundance of the oral gavage community (S2) captured in mouse fecal samples.
+
+```{r}
+perc.retain.M = ggplot(venn.perc[venn.perc$Group %in% c("S2M"),], aes(x=Group, y=Percent)) + 
+  geom_boxplot(aes(group=Group)) +
+  geom_jitter(width=0.15, height=0, aes(color=Subject)) +
+  ylim(55,100)
+
+#View
+perc.retain.M
+#Save
+postscript("Figures/Fig3D.ps", width = 3, height = 3, horizontal = FALSE, colormodel = "rgb", fonts=c("serif"))
+perc.retain.M
+dev.off()
+```
+
+##Figure 3E
+Bray-Curtis (BC), Jaccard (J), weighted UniFrac (wUF), and unweighted UniFrac (uwUF) beta-diversity measures of mouse samples compared to samples from their matched subject donor (DONOR) or compared to any other subject in the dataset (OTHER).
+
+Pull out distances from donor.other for each comparison and metric
+```{r}
+match.BC = as.vector(donor.other[donor.other$comparison == "match" & donor.other$metric == "BC",]$distance)
+unmatch.BC = as.vector(donor.other[donor.other$comparison == "unmatch" & donor.other$metric == "BC",]$distance)
+
+match.J = as.vector(donor.other[donor.other$comparison == "match" & donor.other$metric == "J",]$distance)
+unmatch.J = as.vector(donor.other[donor.other$comparison == "unmatch" & donor.other$metric == "J",]$distance)
+
+match.wUF = as.vector(donor.other[donor.other$comparison == "match" & donor.other$metric == "wUF",]$distance)
+unmatch.wUF = as.vector(donor.other[donor.other$comparison == "unmatch" & donor.other$metric == "wUF",]$distance)
+
+match.uwUF = as.vector(donor.other[donor.other$comparison == "match" & donor.other$metric == "uwUF",]$distance)
+unmatch.uwUF = as.vector(donor.other[donor.other$comparison == "unmatch" & donor.other$metric == "uwUF",]$distance)
+```
+
+Calculate mean and standard errors
+```{r}
+dist.summary = data.frame(
+  mean = c(mean(match.BC), mean(unmatch.BC),
+           mean(match.J), mean(unmatch.J),
+           mean(match.wUF), mean(unmatch.wUF),
+           mean(match.uwUF), mean(unmatch.uwUF)),
+  se = c(sd(match.BC)/sqrt(length(match.BC)),
+         sd(unmatch.BC)/sqrt(length(unmatch.BC)),
+         sd(match.J)/sqrt(length(match.J)),
+         sd(unmatch.J)/sqrt(length(unmatch.J)),
+         sd(match.wUF)/sqrt(length(match.wUF)),
+         sd(unmatch.wUF)/sqrt(length(unmatch.wUF)),
+         sd(match.uwUF)/sqrt(length(match.uwUF)),
+         sd(unmatch.uwUF)/sqrt(length(unmatch.uwUF))),
+  comp = rep(c("match", "unmatch"), times=4),
+  dist = c("BC","BC","J","J","wUF","wUF","uwUF","uwUF"),
+  group = c("1mBC","2uBC","3mJ","4uJ","5mwUF","6uwUF","7muwUF","8uuwUF"))
+```
+
+Plot means with se error bars
+```{r}
+#Set limits of error bars to be +/- standard error
+limits = aes(ymax = dist.summary$mean + dist.summary$se, ymin = dist.summary$mean - dist.summary$se)
+
+#Create base plot
+p1 = ggplot(data = dist.summary, aes(x = group, y = mean, color=comp))
+
+#Add data bars
+bar_donor_other=
+  p1 + geom_bar(fill='white', stat = "identity", position = position_dodge(0.9)) +
+  geom_errorbar(limits, position = position_dodge(0.9),  width = 0.25) +
+  labs(x = "", y = "Distance") + 
+  theme_bw() + 
+  theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"), axis.text = element_text(colour="black"), axis.ticks = element_line(colour="black")) +
+  scale_color_manual(values=c('black','black'))  +
+    theme(legend.position="none")
+  
+#View
+bar_donor_other
+
+#Save
+save_plot("Figures/Fig3E.eps", bar_donor_other, base_height=2.5, base_width=3.5)
+```
+
+##Figure S1
+Shannon’s diversity of microbial communities for the eight sequenced human samples. S1 (red) and S2 (yellow) represent randomly selected straws for each subject. 
+
+```{r}
+#Create variable of subject wih sample type
+meta$Subject.type = paste(meta$Subject, meta$Type)
+
+shannon.plot = ggplot(meta[meta$Type %in% c("S1","S2"),], aes(Subject.type, shannon)) +   
+  geom_bar(aes(fill = Type), position = "dodge", stat="identity") +
+  ggtitle("Shannon") +
+  scale_fill_manual(values=c("red","yellow"))
+
+#View
+shannon.plot
+#Save
+save_plot("Figures/FigS1.eps", shannon.plot, base_height=3, base_width=4)
+```
+
+##Figure S2
+Genera that tended to be lost or bloomed in humanized mice. Relative abundances of genera at least 1% relative abundance in at least one straw2 (S2) or mouse (M) sample. Colored by subject and split into (A) more highly abundant and (B) lower abundance genera. Bars for mice are averages across the three mouse fecal samples for each subject.
+
+First, explore all taxa
+```{r}
+bloom.taxa.all=ggplot(genus.melt, aes(variable:Type.ord, value)) +   
+  geom_bar(aes(fill = Subject), position = "dodge", stat="identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+bloom.taxa.all
+```
+
+Select those with visual pattern of higher or lower in mice than respective donor.
+```{r}
+#Fig S2A - Higher abundance taxa
+bloom.taxa.high=ggplot(genus.melt[genus.melt$variable %in% c("g__Akkermansia","g__Bacteroides","g__Ruminococcus"),], aes(variable:Type.ord, value)) +   
+  geom_bar(aes(fill = Subject), position = "dodge", stat="identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+#Fig S2B - Lower abundance taxa
+bloom.taxa.low=ggplot(genus.melt[genus.melt$variable %in% c("g__Bifidobacterium","g__Collinsella","g__Dialister","g__Lachnospira","g__Streptococcus","g__Sutterella"),], aes(variable:Type.ord, value)) +   
+  geom_bar(aes(fill = Subject), position = "dodge", stat="identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+bloom.taxa.high
+bloom.taxa.low
+
+postscript("Figures/FigS2A.ps", width = 3, height = 4, horizontal = FALSE, colormodel = "rgb", fonts=c("serif"))
+bloom.taxa.high
+dev.off()
+
+postscript("Figures/FigS2B.ps", width = 6, height = 4, horizontal = FALSE, colormodel = "rgb", fonts=c("serif"))
+bloom.taxa.low
+dev.off()
+```
+
+##Figure S4
+Unweighted UniFrac beta-diversity of FAST and mouse fecal microbiota. Non-metric multidimensional scaling plots of the unweighted UniFrac metric between all samples. Samples are colored by subject. Shapes indicate sample type. Black ellipses are standard error for human and mouse groups.
+
+```{r}
+nMDS_uwUF_all=plot_ordination(physeq.tree, uwUF.nmds, type="sites", color="Subject", shape="Type") + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_rect(color="black", fill=NA)) +
+  ggtitle("Unweighted UniFrac") +
+  stat_ellipse(aes(group=HM), level=0.95)
+
+#View
+nMDS_uwUF_all
+
+#Save
+save_plot("Figures/FigS4.eps", nMDS_uwUF_all)
+```
+
+FIN
