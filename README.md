@@ -16,4 +16,4 @@ Overall, FAST allows for repetitive subsampling without thawing of the specimens
 ## KEYWORDS:
 Choline; FAST; Fecal Aliquot Straw Technique; Microbiome; TMAO
 
-PMID: 29776435 PMCID: PMC5960144 DOI: 
+PMID: 29776435 PMCID: PMC5960144
