@@ -1,7 +1,7 @@
 # FAST_method
 Analyses associated with
 
-> Romano KA, Dill-McFarland KA, Kasahara K, Kerby RL1 Vivas EI, Amador-Noguez D, Herd P, Rey FE. 2018. Fecal Aliquot Straw Technique (FAST) allows for easy and reproducible subsampling: assessing interpersonal variation in trimethylamine-N-oxide (TMAO) accumulation. *Microbiome* 6(1):91. doi: [10.1186/s40168-018-0458-8](https://www.ncbi.nlm.nih.gov/pubmed/29776435).
+> Romano KA, Dill-McFarland KA, Kasahara K, Kerby RL, Vivas EI, Amador-Noguez D, Herd P, Rey FE. 2018. Fecal Aliquot Straw Technique (FAST) allows for easy and reproducible subsampling: assessing interpersonal variation in trimethylamine-N-oxide (TMAO) accumulation. *Microbiome* 6(1):91. doi: [10.1186/s40168-018-0458-8](https://www.ncbi.nlm.nih.gov/pubmed/29776435).
 
 ## Abstract
 ### BACKGROUND:
